@@ -22,8 +22,9 @@ class ChatbotPluginTest extends TestCase
 
         $this->assertStringContainsString('chatbot-widget', $markup);
         $this->assertStringContainsString('data-endpoint="/chatbot-endpoint.php"', $markup);
-        $this->assertStringContainsString('Demo Site Assistant', $markup);
+        $this->assertStringContainsString('Demo Site', $markup);
         $this->assertStringContainsString('chatbot.js', $markup);
+        $this->assertStringNotContainsString('Mute notifications', $markup);
     }
 
     public function testSendMessageBuildsPayloadAndUsesWebhook(): void
