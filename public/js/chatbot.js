@@ -490,21 +490,99 @@
     }
 
     function pickSummary(data) {
-        if (!data || typeof data !== 'object') {
-            return '';
-        }
+        const normalizedCandidates = [
+            'reply',
+            'message',
+            'messagetext',
+            'statustext',
+            'status',
+            'response',
+            'result',
+            'detail',
+            'details',
+            'description'
+        ];
 
-        const candidates = ['reply', 'message', 'statusText', 'status'];
+        const excludedKeys = ['output', 'outputs'];
 
-        for (let index = 0; index < candidates.length; index += 1) {
-            const value = data[candidates[index]];
+        const normalizeKey = (key) => key.toLowerCase().replace(/[\s_-]+/g, '');
 
-            if (typeof value === 'string' && value.trim()) {
-                return value.trim();
+        const isLikelyCandidate = (key) => {
+            if (!key) {
+                return false;
             }
-        }
 
-        return '';
+            if (normalizedCandidates.includes(key)) {
+                return true;
+            }
+
+            return key.includes('message') || key.includes('reply') || key.includes('response');
+        };
+
+        const isExcluded = (key) => excludedKeys.includes(key);
+
+        const search = (value, key = null, allowBare = false) => {
+            if (typeof value === 'string') {
+                const trimmed = value.trim();
+
+                if (!trimmed) {
+                    return '';
+                }
+
+                if (key === null) {
+                    return allowBare ? trimmed : '';
+                }
+
+                const normalized = normalizeKey(key);
+
+                if (isLikelyCandidate(normalized) || allowBare) {
+                    return trimmed;
+                }
+
+                return '';
+            }
+
+            if (value === null || value === undefined) {
+                return '';
+            }
+
+            if (Array.isArray(value)) {
+                for (let index = 0; index < value.length; index += 1) {
+                    const found = search(value[index], null, allowBare);
+
+                    if (found) {
+                        return found;
+                    }
+                }
+
+                return '';
+            }
+
+            if (typeof value !== 'object') {
+                return '';
+            }
+
+            const entries = Object.entries(value);
+
+            for (let index = 0; index < entries.length; index += 1) {
+                const [childKey, childValue] = entries[index];
+                const normalized = normalizeKey(childKey);
+
+                if (isExcluded(normalized)) {
+                    continue;
+                }
+
+                const found = search(childValue, childKey, isLikelyCandidate(normalized));
+
+                if (found) {
+                    return found;
+                }
+            }
+
+            return '';
+        };
+
+        return search(data, null, true) || '';
     }
 
     function createReplyContent(data, fallbackMessage) {

@@ -30,13 +30,105 @@ if ($message === '') {
     return;
 }
 
+/**
+ * Attempt to locate a human-readable reply string within the webhook response.
+ *
+ * @param mixed $value
+ */
+function findReplyMessage(mixed $value, ?string $key = null, bool $allowBareString = false): string
+{
+    if (is_string($value)) {
+        $trimmed = trim($value);
+
+        if ($trimmed === '') {
+            return '';
+        }
+
+        if ($key === null) {
+            return $allowBareString ? $trimmed : '';
+        }
+
+        $normalizedKey = normalizeReplyKey($key);
+
+        if (isLikelyReplyKey($normalizedKey) || $allowBareString) {
+            return $trimmed;
+        }
+
+        return '';
+    }
+
+    if (!is_array($value)) {
+        return '';
+    }
+
+    if ($key !== null && isExcludedKey($key)) {
+        return '';
+    }
+
+    foreach ($value as $childKey => $childValue) {
+        $childKeyString = is_string($childKey) ? $childKey : null;
+        $normalizedKey = $childKeyString !== null ? normalizeReplyKey($childKeyString) : '';
+        $childAllowBareString = $childKeyString !== null && isLikelyReplyKey($normalizedKey);
+
+        $found = findReplyMessage($childValue, $childKeyString, $childAllowBareString);
+
+        if ($found !== '') {
+            return $found;
+        }
+    }
+
+    return '';
+}
+
+function normalizeReplyKey(string $key): string
+{
+    return strtolower((string) preg_replace('/[\s_-]+/', '', $key));
+}
+
+function isLikelyReplyKey(string $normalizedKey): bool
+{
+    if ($normalizedKey === '') {
+        return false;
+    }
+
+    $directMatches = [
+        'reply',
+        'message',
+        'messagetext',
+        'statustext',
+        'status',
+        'response',
+        'result',
+        'detail',
+        'details',
+        'description',
+    ];
+
+    if (in_array($normalizedKey, $directMatches, true)) {
+        return true;
+    }
+
+    return str_contains($normalizedKey, 'message')
+        || str_contains($normalizedKey, 'reply')
+        || str_contains($normalizedKey, 'response');
+}
+
+function isExcludedKey(string $key): bool
+{
+    $normalizedKey = normalizeReplyKey($key);
+
+    return in_array($normalizedKey, ['output', 'outputs'], true);
+}
+
 try {
     $response = $chatbot->sendMessage($message, ['transport' => 'web']);
     $responseBody = $response->json();
 
-    $reply = isset($responseBody['reply'])
-        ? (string) $responseBody['reply']
-        : ((string) ($responseBody['message'] ?? 'The workflow has received your request.'));
+    $reply = findReplyMessage($responseBody, null, true);
+
+    if ($reply === '') {
+        $reply = 'The workflow has received your request.';
+    }
 
     echo json_encode([
         'status' => $response->isSuccessful() ? 'ok' : 'error',
