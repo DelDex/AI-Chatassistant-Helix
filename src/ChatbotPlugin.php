@@ -57,17 +57,11 @@ class ChatbotPlugin
             <div class="chatbot-header-brand">
                 <span class="chatbot-avatar" aria-hidden="true">🤖</span>
                 <div class="chatbot-header-text">
-                    <span class="chatbot-title">{$siteName} Assistant</span>
+                    <span class="chatbot-title">{$siteName}</span>
                     <span class="chatbot-subtitle"><span class="chatbot-status-dot" aria-hidden="true"></span>Online &middot; Always ready to help</span>
                 </div>
             </div>
             <div class="chatbot-header-actions">
-                <button type="button" class="chatbot-action" aria-label="Open help center">
-                    <span aria-hidden="true">❔</span>
-                </button>
-                <button type="button" class="chatbot-action" aria-label="Mute notifications">
-                    <span aria-hidden="true">🔔</span>
-                </button>
                 <button type="button" class="chatbot-close" aria-label="Close chat">
                     <span aria-hidden="true">&times;</span>
                 </button>
