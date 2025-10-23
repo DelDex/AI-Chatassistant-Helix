@@ -40,8 +40,10 @@ try {
 
     echo json_encode([
         'status' => $response->isSuccessful() ? 'ok' : 'error',
+        'reply' => $reply,
         'message' => $reply,
         'webhookStatus' => $response->getStatusCode(),
+        'payload' => $responseBody,
     ]);
 } catch (Throwable $exception) {
     http_response_code(500);
