@@ -40,7 +40,7 @@ function findReplyMessage(mixed $value, ?string $key = null, bool $allowBareStri
     if (is_string($value)) {
         $trimmed = trim($value);
 
-        if ($trimmed === '') {
+        if ($trimmed === '' || looksLikeAutomationBlob($trimmed)) {
             return '';
         }
 
@@ -61,16 +61,16 @@ function findReplyMessage(mixed $value, ?string $key = null, bool $allowBareStri
         return '';
     }
 
-    if ($key !== null && isExcludedKey($key)) {
-        return '';
-    }
-
     foreach ($value as $childKey => $childValue) {
         $childKeyString = is_string($childKey) ? $childKey : null;
         $normalizedKey = $childKeyString !== null ? normalizeReplyKey($childKeyString) : '';
         $childAllowBareString = $childKeyString !== null && isLikelyReplyKey($normalizedKey);
 
-        $found = findReplyMessage($childValue, $childKeyString, $childAllowBareString);
+        if ($childKeyString !== null && isExcludedKey($childKeyString)) {
+            $childAllowBareString = false;
+        }
+
+        $found = findReplyMessage($childValue, $childKeyString, $childAllowBareString || $allowBareString);
 
         if ($found !== '') {
             return $found;
@@ -118,6 +118,32 @@ function isExcludedKey(string $key): bool
     $normalizedKey = normalizeReplyKey($key);
 
     return in_array($normalizedKey, ['output', 'outputs'], true);
+}
+
+function looksLikeAutomationBlob(string $text): bool
+{
+    $length = function_exists('mb_strlen') ? mb_strlen($text) : strlen($text);
+
+    if ($length === 0) {
+        return false;
+    }
+
+    if ($length > 4000) {
+        return true;
+    }
+
+    $firstChar = function_exists('mb_substr') ? mb_substr($text, 0, 1) : substr($text, 0, 1);
+    $lastChar = function_exists('mb_substr') ? mb_substr($text, -1) : substr($text, -1);
+
+    if (($firstChar === '{' && $lastChar === '}') || ($firstChar === '[' && $lastChar === ']')) {
+        return true;
+    }
+
+    if ($length > 600 && preg_match('/\s/', $text) === 0) {
+        return true;
+    }
+
+    return false;
 }
 
 try {
