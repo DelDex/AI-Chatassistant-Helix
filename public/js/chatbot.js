@@ -12,27 +12,108 @@
     const messagesEl = widget.querySelector('.chatbot-messages');
     const form = widget.querySelector('.chatbot-form');
     const textarea = widget.querySelector('textarea');
+    const statusEl = widget.querySelector('.chatbot-status');
+    const dragHandles = widget.querySelectorAll('[data-drag-handle], .chatbot-toggle');
     const TEXT_NODE = typeof Node !== 'undefined' ? Node.TEXT_NODE : 3;
+    const MIN_MARGIN = 16;
+    const POSITION_STORAGE_KEY = 'chatbot-plugin-position';
 
-    if (!toggleButton || !closeButton || !windowEl || !messagesEl || !form || !textarea) {
+    if (!toggleButton || !closeButton || !windowEl || !messagesEl || !form || !textarea || !statusEl) {
         return;
     }
 
-    const statusEl = document.createElement('div');
-    statusEl.className = 'chatbot-status';
-    statusEl.setAttribute('role', 'status');
-    form.appendChild(statusEl);
-
     let isSending = false;
+    let typingMessage = null;
+
+    function clamp(value, min, max) {
+        return Math.min(max, Math.max(min, value));
+    }
+
+    function formatTime(date) {
+        try {
+            return new Intl.DateTimeFormat(undefined, {
+                hour: 'numeric',
+                minute: '2-digit'
+            }).format(date);
+        } catch (error) {
+            return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+        }
+    }
+
+    function readSavedPosition() {
+        try {
+            if (typeof window === 'undefined' || !('localStorage' in window)) {
+                return null;
+            }
+
+            const raw = window.localStorage.getItem(POSITION_STORAGE_KEY);
+            if (!raw) {
+                return null;
+            }
+
+            const parsed = JSON.parse(raw);
+            if (!parsed || typeof parsed !== 'object') {
+                return null;
+            }
+
+            const horizontal = parsed.horizontal;
+            const vertical = parsed.vertical;
+            const offsetX = Number(parsed.offsetX);
+            const offsetY = Number(parsed.offsetY);
+
+            if (!['left', 'right'].includes(horizontal) || !['top', 'bottom'].includes(vertical)) {
+                return null;
+            }
+
+            return {
+                horizontal,
+                vertical,
+                offsetX: Number.isFinite(offsetX) ? offsetX : 32,
+                offsetY: Number.isFinite(offsetY) ? offsetY : 32
+            };
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function savePosition(position) {
+        try {
+            if (typeof window === 'undefined' || !('localStorage' in window)) {
+                return;
+            }
+
+            window.localStorage.setItem(POSITION_STORAGE_KEY, JSON.stringify(position));
+        } catch (error) {
+            // Ignore storage errors.
+        }
+    }
+
+    function applyPosition(position) {
+        const resolved = position || { horizontal: 'left', vertical: 'bottom', offsetX: 32, offsetY: 32 };
+
+        ['top', 'right', 'bottom', 'left'].forEach((edge) => {
+            widget.style[edge] = '';
+        });
+
+        const offsetX = Math.max(MIN_MARGIN, Math.round(resolved.offsetX));
+        const offsetY = Math.max(MIN_MARGIN, Math.round(resolved.offsetY));
+
+        widget.style.setProperty(resolved.horizontal, `${offsetX}px`);
+        widget.style.setProperty(resolved.vertical, `${offsetY}px`);
+    }
+
+    applyPosition(readSavedPosition());
 
     function setStatus(text) {
         statusEl.textContent = text;
     }
 
     function toggleWindow(open) {
-        const shouldOpen = typeof open === 'boolean' ? open : !windowEl.classList.contains('is-open');
-        windowEl.classList.toggle('is-open', shouldOpen);
+        const shouldOpen = typeof open === 'boolean' ? open : !widget.classList.contains('is-open');
+        widget.classList.toggle('is-open', shouldOpen);
         windowEl.setAttribute('aria-hidden', String(!shouldOpen));
+        toggleButton.setAttribute('aria-expanded', String(shouldOpen));
+
         if (shouldOpen) {
             textarea.focus();
         } else {
@@ -40,16 +121,155 @@
         }
     }
 
-    function appendMessage(content, isUser = false, extraClass = '') {
+    function createMetaButton(icon, label) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'chatbot-meta-btn';
+        button.title = label;
+        button.setAttribute('aria-label', label);
+
+        const iconSpan = document.createElement('span');
+        iconSpan.setAttribute('aria-hidden', 'true');
+        iconSpan.textContent = icon;
+        button.appendChild(iconSpan);
+
+        return button;
+    }
+
+    function markCopySuccess(button, label) {
+        button.classList.add('is-success');
+        button.setAttribute('aria-label', 'Reply copied');
+        button.title = 'Reply copied';
+        setStatus('Reply copied to your clipboard.');
+
+        window.setTimeout(() => {
+            button.classList.remove('is-success');
+            button.setAttribute('aria-label', label);
+            button.title = label;
+            setStatus('');
+        }, 2000);
+    }
+
+    function copyTextToClipboard(text, button, label) {
+        if (!text) {
+            return;
+        }
+
+        const value = text.replace(/\s+/g, ' ').trim();
+
+        if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+            navigator.clipboard.writeText(value).then(() => {
+                markCopySuccess(button, label);
+            }).catch(() => {
+                fallbackCopy(value, button, label);
+            });
+            return;
+        }
+
+        fallbackCopy(value, button, label);
+    }
+
+    function fallbackCopy(value, button, label) {
+        const temp = document.createElement('textarea');
+        temp.value = value;
+        temp.setAttribute('readonly', '');
+        temp.style.position = 'fixed';
+        temp.style.opacity = '0';
+        document.body.appendChild(temp);
+        temp.select();
+
+        try {
+            document.execCommand('copy');
+            markCopySuccess(button, label);
+        } catch (error) {
+            setStatus('Copy is unavailable in this browser.');
+        }
+
+        document.body.removeChild(temp);
+    }
+
+    function setupReactionButtons(buttons) {
+        buttons.forEach((button) => {
+            button.setAttribute('aria-pressed', 'false');
+            button.addEventListener('click', () => {
+                const isActive = button.classList.toggle('is-active');
+                button.setAttribute('aria-pressed', String(isActive));
+
+                buttons.forEach((other) => {
+                    if (other !== button) {
+                        other.classList.remove('is-active');
+                        other.setAttribute('aria-pressed', 'false');
+                    }
+                });
+
+                if (isActive) {
+                    const sentiment = button.dataset.reaction === 'positive' ? 'positive' : 'negative';
+                    setStatus(`Thanks for the ${sentiment} feedback.`);
+                } else {
+                    setStatus('');
+                }
+            });
+        });
+    }
+
+    function appendMessage(content, isUser = false, extraClass = '', showMeta = true) {
         const message = document.createElement('div');
-        message.className = 'chatbot-message' + (isUser ? ' is-user' : '') + (extraClass ? ` ${extraClass}` : '');
+        message.className = 'chatbot-message';
+
+        if (isUser) {
+            message.classList.add('is-user');
+        }
+
+        if (extraClass) {
+            message.classList.add(extraClass);
+        }
+
+        const bubble = document.createElement('div');
+        bubble.className = 'chatbot-bubble';
 
         if (typeof content === 'string') {
-            message.textContent = content;
+            bubble.textContent = content;
         } else if (typeof Node !== 'undefined' && content instanceof Node) {
-            message.appendChild(content);
+            bubble.appendChild(content);
         } else if (content !== null && content !== undefined) {
-            message.textContent = String(content);
+            bubble.textContent = String(content);
+        }
+
+        message.appendChild(bubble);
+
+        if (showMeta) {
+            const meta = document.createElement('div');
+            meta.className = 'chatbot-meta';
+
+            const timeEl = document.createElement('span');
+            timeEl.className = 'chatbot-meta-time';
+            timeEl.textContent = formatTime(new Date());
+            meta.appendChild(timeEl);
+
+            if (!isUser) {
+                const actions = document.createElement('span');
+                actions.className = 'chatbot-meta-actions';
+
+                const copyLabel = 'Copy reply';
+                const copyButton = createMetaButton('📋', copyLabel);
+                copyButton.addEventListener('click', () => {
+                    copyTextToClipboard(bubble.textContent || '', copyButton, copyLabel);
+                });
+
+                const likeButton = createMetaButton('👍', 'Mark reply as helpful');
+                likeButton.dataset.reaction = 'positive';
+                const dislikeButton = createMetaButton('👎', 'Mark reply as not helpful');
+                dislikeButton.dataset.reaction = 'negative';
+
+                setupReactionButtons([likeButton, dislikeButton]);
+
+                actions.appendChild(copyButton);
+                actions.appendChild(likeButton);
+                actions.appendChild(dislikeButton);
+                meta.appendChild(actions);
+            }
+
+            message.appendChild(meta);
         }
 
         messagesEl.appendChild(message);
@@ -57,8 +277,6 @@
 
         return message;
     }
-
-    let typingMessage = null;
 
     function createTypingIndicatorContent() {
         const wrapper = document.createElement('div');
@@ -88,7 +306,7 @@
             return typingMessage;
         }
 
-        typingMessage = appendMessage(createTypingIndicatorContent(), false, 'chatbot-typing');
+        typingMessage = appendMessage(createTypingIndicatorContent(), false, 'chatbot-typing', false);
         return typingMessage;
     }
 
@@ -149,7 +367,7 @@
             ['payload'],
             ['data'],
             ['result'],
-            ['output'],
+            ['output']
         ];
 
         for (let index = 0; index < candidatePaths.length; index += 1) {
@@ -283,13 +501,123 @@
         return wrapper;
     }
 
-    toggleButton.addEventListener('click', () => toggleWindow(true));
+    toggleButton.addEventListener('click', () => toggleWindow());
     closeButton.addEventListener('click', () => toggleWindow(false));
 
     document.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape' && windowEl.classList.contains('is-open')) {
+        if (event.key === 'Escape' && widget.classList.contains('is-open')) {
             toggleWindow(false);
         }
+    });
+
+    let dragState = null;
+
+    function handlePointerMove(event) {
+        if (!dragState || event.pointerId !== dragState.pointerId) {
+            return;
+        }
+
+        const deltaX = event.clientX - dragState.startX;
+        const deltaY = event.clientY - dragState.startY;
+
+        if (!dragState.hasMoved) {
+            if (Math.abs(deltaX) < 5 && Math.abs(deltaY) < 5) {
+                return;
+            }
+
+            dragState.hasMoved = true;
+            widget.classList.add('is-dragging');
+            widget.style.transition = 'none';
+            widget.style.top = `${dragState.startTop}px`;
+            widget.style.left = `${dragState.startLeft}px`;
+            widget.style.right = 'auto';
+            widget.style.bottom = 'auto';
+        }
+
+        const proposedLeft = event.clientX - dragState.offsetX;
+        const proposedTop = event.clientY - dragState.offsetY;
+
+        const horizontalMax = Math.max(MIN_MARGIN, window.innerWidth - dragState.width - MIN_MARGIN);
+        const verticalMax = Math.max(MIN_MARGIN, window.innerHeight - dragState.height - MIN_MARGIN);
+
+        const minLeft = Math.min(MIN_MARGIN, horizontalMax);
+        const minTop = Math.min(MIN_MARGIN, verticalMax);
+
+        const left = clamp(proposedLeft, minLeft, horizontalMax);
+        const top = clamp(proposedTop, minTop, verticalMax);
+
+        widget.style.left = `${left}px`;
+        widget.style.top = `${top}px`;
+    }
+
+    function finishDrag(event) {
+        if (!dragState || event.pointerId !== dragState.pointerId) {
+            return;
+        }
+
+        window.removeEventListener('pointermove', handlePointerMove);
+        window.removeEventListener('pointerup', finishDrag);
+        window.removeEventListener('pointercancel', finishDrag);
+
+        if (!dragState.hasMoved) {
+            dragState = null;
+            widget.style.transition = '';
+            return;
+        }
+
+        const rect = widget.getBoundingClientRect();
+
+        const distances = {
+            left: rect.left,
+            right: window.innerWidth - (rect.left + rect.width),
+            top: rect.top,
+            bottom: window.innerHeight - (rect.top + rect.height)
+        };
+
+        const horizontalEdge = distances.left <= distances.right ? 'left' : 'right';
+        const verticalEdge = distances.top <= distances.bottom ? 'top' : 'bottom';
+
+        const position = {
+            horizontal: horizontalEdge,
+            vertical: verticalEdge,
+            offsetX: Math.max(MIN_MARGIN, Math.round(distances[horizontalEdge])),
+            offsetY: Math.max(MIN_MARGIN, Math.round(distances[verticalEdge]))
+        };
+
+        widget.classList.remove('is-dragging');
+        widget.style.transition = '';
+
+        applyPosition(position);
+        savePosition(position);
+
+        dragState = null;
+    }
+
+    dragHandles.forEach((handle) => {
+        handle.addEventListener('pointerdown', (event) => {
+            if (event.pointerType === 'mouse' && event.button !== 0) {
+                return;
+            }
+
+            const rect = widget.getBoundingClientRect();
+
+            dragState = {
+                pointerId: event.pointerId,
+                startX: event.clientX,
+                startY: event.clientY,
+                startLeft: rect.left,
+                startTop: rect.top,
+                offsetX: event.clientX - rect.left,
+                offsetY: event.clientY - rect.top,
+                width: rect.width,
+                height: rect.height,
+                hasMoved: false
+            };
+
+            window.addEventListener('pointermove', handlePointerMove);
+            window.addEventListener('pointerup', finishDrag);
+            window.addEventListener('pointercancel', finishDrag);
+        });
     });
 
     form.addEventListener('submit', async (event) => {
