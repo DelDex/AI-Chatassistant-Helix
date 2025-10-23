@@ -363,11 +363,9 @@
         const candidatePaths = [
             ['payload', 'data'],
             ['payload', 'result'],
-            ['payload', 'output'],
             ['payload'],
             ['data'],
-            ['result'],
-            ['output']
+            ['result']
         ];
 
         for (let index = 0; index < candidatePaths.length; index += 1) {
@@ -380,6 +378,39 @@
         }
 
         return null;
+    }
+
+    function sanitizeStructuredData(value) {
+        if (value === null || value === undefined) {
+            return null;
+        }
+
+        if (Array.isArray(value)) {
+            const sanitizedItems = value
+                .map((item) => sanitizeStructuredData(item))
+                .filter((item) => item !== null && !(Array.isArray(item) && item.length === 0));
+
+            return sanitizedItems.length ? sanitizedItems : null;
+        }
+
+        if (typeof value === 'object') {
+            const excludedKeys = ['output', 'outputs'];
+            const entries = Object.entries(value)
+                .filter(([key]) => !excludedKeys.includes(key.toLowerCase()))
+                .map(([key, child]) => [key, sanitizeStructuredData(child)])
+                .filter(([, child]) => child !== null && !(Array.isArray(child) && child.length === 0));
+
+            if (!entries.length) {
+                return null;
+            }
+
+            return entries.reduce((result, [key, child]) => {
+                result[key] = child;
+                return result;
+            }, {});
+        }
+
+        return value;
     }
 
     function renderStructuredData(value) {
@@ -478,7 +509,7 @@
 
     function createReplyContent(data, fallbackMessage) {
         const summary = pickSummary(data);
-        const structuredData = findStructuredData(data);
+        const structuredData = sanitizeStructuredData(findStructuredData(data));
 
         const structuredNode = renderStructuredData(structuredData);
 
@@ -655,7 +686,7 @@
             }
 
             const data = await response.json();
-            const fallback = `Thanks! The ${siteName} workflow received your request.`;
+            const fallback = `The ${siteName} workflow has received your request.`;
             hideTypingIndicator();
             const replyContent = createReplyContent(data, fallback);
             appendMessage(replyContent, false);

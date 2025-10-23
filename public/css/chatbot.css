@@ -270,6 +270,8 @@
     color: #111827;
     box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
     position: relative;
+    word-break: break-word;
+    overflow-wrap: anywhere;
 }
 
 .chatbot-message.is-user .chatbot-bubble {

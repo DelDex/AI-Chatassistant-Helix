@@ -36,7 +36,7 @@ try {
 
     $reply = isset($responseBody['reply'])
         ? (string) $responseBody['reply']
-        : ((string) ($responseBody['message'] ?? 'Thanks! Your request is on its way.'));
+        : ((string) ($responseBody['message'] ?? 'The workflow has received your request.'));
 
     echo json_encode([
         'status' => $response->isSuccessful() ? 'ok' : 'error',
